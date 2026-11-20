@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+tzdata
+static-ffmpeg
+pyinstaller
