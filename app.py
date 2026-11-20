@@ -35,78 +35,99 @@ def pick_folder():
     except Exception:
         return ""
 
+def show_report(pr, xlsx, name):
+    if pr.returncode != 0 or not xlsx.exists():
+        st.error("הבדיקה נכשלה לפני שנוצר דוח. העתיקו את ההודעה ושלחו לשירה:")
+        st.code((pr.stdout + "\n" + pr.stderr)[-3000:]); return
+    S = pd.read_excel(xlsx, sheet_name="סיכום"); D = pd.read_excel(xlsx, sheet_name="פירוט")
+    nf = int((S["סטטוס כולל"] == "FAIL").sum()); nw = int((S["סטטוס כולל"] == "WARN").sum())
+    msg = f"נבדקו {len(S)} משתתפים: {len(S)-nf-nw} תקינים, {nw} לבדוק, {nf} כשלים."
+    (st.error if nf else st.warning if nw else st.success)(("יש כשלים שחובה לטפל בהם. " if nf else "") + msg)
+    st.dataframe(color(S[["משתתף", "test_ID", "סטטוס כולל"]], "סטטוס כולל"), hide_index=True)
+    bad = D[D["סטטוס"].isin(["FAIL", "WARN"])].sort_values("סטטוס")
+    if len(bad):
+        st.subheader("מה דורש טיפול")
+        st.dataframe(color(bad, "סטטוס"), hide_index=True)
+    st.download_button("הורדת הדוח (Excel)", xlsx.read_bytes(), name,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=name)
+
+def save_upload(up, outdir, fname):
+    if up is None:
+        return None
+    p = outdir / (fname + Path(up.name).suffix.lower()); p.write_bytes(up.getvalue()); return str(p)
+
 def color(df, col):
     shown = df.copy()
     shown[col] = shown[col].map(lambda v: LABEL.get(v, v))
     inv = {LABEL[k]: v for k, v in COLORS.items()}
     return shown.style.map(lambda v: f"background-color:{inv.get(v,'')}", subset=[col])
 
-st.title("בדיקה אוטומטית של סוף הניסוי")
-st.write("שלושה צעדים: בחרו את תיקיית המשתתפים, (לא חובה) העלו קובץ שיבוץ, ולחצו **הפעל בדיקה**.")
 
-if "folder" not in st.session_state:
-    st.session_state.folder = ""
-st.subheader("1. תיקיית המשתתפים")
-c1, c2 = st.columns([4, 1])
-with c2:
-    st.write("")
-    if st.button("בחירת תיקייה…"):
-        chosen = pick_folder()
-        if chosen:
-            st.session_state.folder = chosen
-            st.rerun()
+st.title("בדיקות לניסוי")
+tab_pre, tab_end = st.tabs(["לפני הניסוי (שלב 4)", "סוף ניסוי (שלב 10)"])
+
+with tab_pre:
+    st.write("בודק שהמשתתף מילא הסכמה, שאלון דמוגרפי ורישיון, ושיש לו שיבוץ. מריצים כשמתכוננים ליצור קשר לפני הניסוי.")
+    st.info("העלו ייצוא Qualtrics (csv או xlsx) של כל טופס. אפשר להעלות רק חלק מהם. העמודות מזוהות אוטומטית, ובדוח כתוב באיזו עמודה נעשה שימוש.")
+    asg = st.file_uploader("טבלת שיבוץ (csv או xlsx, עמודות participant ו-test_ID)", type=["csv", "xlsx"], key="p_asg")
+    u1 = st.file_uploader("הסכמה מדעת", type=["csv", "xlsx"], key="p_c")
+    u2 = st.file_uploader("שאלון דמוגרפי", type=["csv", "xlsx"], key="p_d")
+    u3 = st.file_uploader("רישיון נהיגה", type=["csv", "xlsx"], key="p_l")
+    only = st.text_input("בדיקה רק למשתתפים אלה (לא חובה, למשל D7,D8). ריק = כל מי שבשיבוץ", key="p_only")
+    idcol = st.text_input("שם עמודת מספר המשתתף בטפסים (לא חובה, אם הזיהוי האוטומטי נכשל)", key="p_idcol")
+    if st.button("הפעל בדיקה לפני הניסוי", type="primary", disabled=asg is None):
+        outdir = Path(tempfile.mkdtemp(prefix="pre_out_"))
+        cmd = SELF + ["--before", "--assignment", save_upload(asg, outdir, "assignment"), "--out", str(outdir)]
+        for flag, up, nm in (("--consent", u1, "consent"), ("--demographic", u2, "demographic"), ("--license", u3, "license")):
+            pth = save_upload(up, outdir, nm)
+            if pth: cmd += [flag, pth]
+        if only.strip(): cmd += ["--only", only.strip()]
+        if idcol.strip(): cmd += ["--id-col", idcol.strip()]
+        with st.spinner("בודק…"):
+            pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        show_report(pr, outdir / "pre_check_report.xlsx", "pre_check_report.xlsx")
+        st.caption("הבדיקה לא מחליפה צפייה בסרטון האפוטרופוס ובתמונת הרישיון: היא בודקת רק שהקבצים הועלו.")
+
+with tab_end:
+    st.write("בודק את תיקיות המשתתפים אחרי הניסוי: קובץ תוצאות, קובץ הקלטה (וידאו ואורך), כיסוי ההקלטה את הסקר ותקינות התשובות.")
+    if "folder" not in st.session_state:
+        st.session_state.folder = ""
+    c1, c2 = st.columns([4, 1])
+    with c2:
+        st.write("")
+        if st.button("בחירת תיקייה…"):
+            chosen = pick_folder()
+            if chosen:
+                st.session_state.folder = chosen
+                st.rerun()
+            else:
+                st.warning("חלון בחירת התיקייה לא נפתח או בוטל. אפשר להדביק את נתיב התיקייה בשדה.")
+    with c1:
+        folder = st.text_input("תיקיית המשתתפים (אפשר גם להדביק נתיב ידנית)", key="folder")
+    if folder:
+        p = Path(folder)
+        if p.is_dir():
+            found = [i.name for i in p.iterdir() if i.suffix.lower() == ".zip" or (i.is_dir() and i.name[:1] in "Dd" and i.name[1:2].isdigit())]
+            (st.success if found else st.warning)(f"נמצאו {len(found)} משתתפים: {', '.join(sorted(found)[:6])}{'…' if len(found) > 6 else ''}" if found else "בתיקייה אין קבצי zip או תיקיות של משתתפים (D…).")
         else:
-            st.warning("חלון בחירת התיקייה לא נפתח או בוטל. אפשר להדביק את נתיב התיקייה בשדה.")
-with c1:
-    folder = st.text_input("נתיב התיקייה (אפשר גם להדביק ידנית)", key="folder")
-
-if folder:
-    p = Path(folder)
-    if p.is_dir():
-        found = [i.name for i in p.iterdir() if i.suffix.lower() == ".zip" or (i.is_dir() and i.name[:1] in "Dd" and i.name[1:2].isdigit())]
-        if found:
-            st.success(f"נמצאו {len(found)} משתתפים: {', '.join(sorted(found)[:6])}{'…' if len(found) > 6 else ''}")
-        else:
-            st.warning("בתיקייה אין קבצי zip או תיקיות של משתתפים (D…). בדקו שבחרתם את התיקייה הנכונה.")
-    else:
-        st.error("התיקייה לא קיימת.")
-
-st.subheader("2. קובץ שיבוץ (לא חובה)")
-up = st.file_uploader("csv עם העמודות participant ו-test_ID", type=["csv"])
-
-with st.expander("הגדרות מתקדמות (ברירות המחדל מתאימות)"):
-    a, b, c = st.columns(3)
-    pairs = a.number_input("זוגות צפויים", 1, 50, 8)
-    mn = b.number_input("משך מינימלי (דק׳)", 0.0, 500.0, 10.0)
-    mx = c.number_input("משך מקסימלי (דק׳)", 0.0, 500.0, 90.0)
-    pg = a.number_input("שניות מינימום לעמוד", 0.0, 600.0, 20.0)
-    eq = b.number_input("% תשובות ״שווה״ מקסימלי", 0.0, 100.0, 40.0)
-    ld = c.number_input("פער הקלטה/שאלון (דק׳)", 0.0, 500.0, 20.0)
-
-st.subheader("3. הפעלה")
-if st.button("הפעל בדיקה", type="primary", disabled=not (folder and Path(folder).is_dir())):
-    outdir = Path(tempfile.mkdtemp(prefix="chk_out_"))
-    cmd = SELF + ["--checker", folder, "--out", str(outdir),
-           "--expected-pairs", str(pairs), "--min-minutes", str(mn), "--max-minutes", str(mx),
-           "--min-page-seconds", str(pg), "--max-equal-pct", str(eq), "--max-lead-minutes", str(ld)]
-    if up is not None:
-        ap = outdir / "assignment.csv"; ap.write_bytes(up.getvalue()); cmd += ["--assignment", str(ap)]
-    with st.spinner("הבדיקה רצה. עם הקלטות גדולות זה יכול לקחת כמה דקות…"):
-        pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    xlsx = outdir / "session_check_report.xlsx"
-    if pr.returncode != 0 or not xlsx.exists():
-        st.error("הבדיקה נכשלה לפני שנוצר דוח. העתיקו את ההודעה ושלחו לשירה:")
-        st.code((pr.stdout + "\n" + pr.stderr)[-3000:])
-    else:
-        S = pd.read_excel(xlsx, sheet_name="סיכום"); D = pd.read_excel(xlsx, sheet_name="פירוט")
-        nf = int((S["סטטוס כולל"] == "FAIL").sum()); nw = int((S["סטטוס כולל"] == "WARN").sum())
-        msg = f"נבדקו {len(S)} משתתפים: {len(S)-nf-nw} תקינים, {nw} לבדוק, {nf} כשלים."
-        (st.error if nf else st.warning if nw else st.success)(("יש כשלים שחובה לטפל בהם. " if nf else "") + msg)
-        st.dataframe(color(S[["משתתף", "test_ID", "סטטוס כולל"]], "סטטוס כולל"), hide_index=True)
-        bad = D[D["סטטוס"].isin(["FAIL", "WARN"])].sort_values("סטטוס")
-        if len(bad):
-            st.subheader("מה דורש טיפול")
-            st.dataframe(color(bad, "סטטוס"), hide_index=True)
-        st.caption("הבדיקה אינה מכסה הסכמה, שאלון דמוגרפי, רישיון נהיגה ואישור אפוטרופוס.")
-        st.download_button("הורדת הדוח (Excel)", xlsx.read_bytes(), "session_check_report.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.error("התיקייה לא קיימת.")
+    up = st.file_uploader("קובץ שיבוץ (לא חובה; csv עם participant ו-test_ID)", type=["csv"], key="e_asg")
+    with st.expander("הגדרות מתקדמות (ברירות המחדל מתאימות)"):
+        a, b, c = st.columns(3)
+        pairs = a.number_input("זוגות צפויים", 1, 50, 8)
+        mn = b.number_input("משך מינימלי (דק׳)", 0.0, 500.0, 10.0)
+        mx = c.number_input("משך מקסימלי (דק׳)", 0.0, 500.0, 90.0)
+        pg = a.number_input("שניות מינימום לעמוד", 0.0, 600.0, 20.0)
+        eq = b.number_input("% תשובות ״שווה״ מקסימלי", 0.0, 100.0, 40.0)
+        ld = c.number_input("פער הקלטה/שאלון (דק׳)", 0.0, 500.0, 20.0)
+    if st.button("הפעל בדיקת סוף ניסוי", type="primary", disabled=not (folder and Path(folder).is_dir())):
+        outdir = Path(tempfile.mkdtemp(prefix="chk_out_"))
+        cmd = SELF + ["--checker", folder, "--out", str(outdir),
+               "--expected-pairs", str(pairs), "--min-minutes", str(mn), "--max-minutes", str(mx),
+               "--min-page-seconds", str(pg), "--max-equal-pct", str(eq), "--max-lead-minutes", str(ld)]
+        ap = save_upload(up, outdir, "assignment")
+        if ap: cmd += ["--assignment", ap]
+        with st.spinner("הבדיקה רצה. עם הקלטות גדולות זה יכול לקחת כמה דקות…"):
+            pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        show_report(pr, outdir / "session_check_report.xlsx", "session_check_report.xlsx")
+        st.caption("הבדיקה לא מכסה הסכמה, שאלון דמוגרפי, רישיון ואישור אפוטרופוס: אלה נבדקים בלשונית ״לפני הניסוי״.")

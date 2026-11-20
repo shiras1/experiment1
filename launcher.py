@@ -22,6 +22,12 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8"); sys.stderr.reconfigure(encoding="utf-8")
         runpy.run_path(str(BASE / "check_sessions.py"), run_name="__main__")
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "--before":
+        sys.argv = ["check_before.py"] + sys.argv[2:]
+        sys.path.insert(0, str(BASE))
+        sys.stdout.reconfigure(encoding="utf-8"); sys.stderr.reconfigure(encoding="utf-8")
+        runpy.run_path(str(BASE / "check_before.py"), run_name="__main__")
+        return
     cred = Path.home() / ".streamlit" / "credentials.toml"
     if not cred.exists():
         cred.parent.mkdir(exist_ok=True); cred.write_text('[general]\nemail = ""\n')
