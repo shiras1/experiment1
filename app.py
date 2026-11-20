@@ -115,7 +115,7 @@ tab_pre, tab_end = st.tabs(["לפני הניסוי (שלב 4)", "סוף ניסו
 
 with tab_pre:
     st.write("בודק שהמשתתף מילא הסכמה, שאלון דמוגרפי ורישיון, ושיש לו שיבוץ. מריצים כשמתכוננים ליצור קשר לפני הניסוי.")
-    st.info("העלו ייצוא Qualtrics (csv או xlsx) של כל טופס. אפשר להעלות רק חלק מהם. העמודות מזוהות אוטומטית, ובדוח כתוב באיזו עמודה נעשה שימוש.")
+    st.info("מעלים את הגיליון של כל טופס כקובץ csv או xlsx (ב-Google Sheets: File ← Download). אפשר להעלות רק חלק מהם. העמודות מזוהות אוטומטית לפי שמות הכותרות, ובדוח כתוב באיזו עמודה נעשה שימוש.")
     asg = st.file_uploader("טבלת שיבוץ (csv או xlsx, עמודות participant ו-test_ID)", type=["csv", "xlsx"], key="p_asg")
     u1 = st.file_uploader("הסכמה מדעת", type=["csv", "xlsx"], key="p_c")
     u2 = st.file_uploader("שאלון דמוגרפי", type=["csv", "xlsx"], key="p_d")

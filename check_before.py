@@ -30,15 +30,20 @@ NEG = ["לא מסכים", "אינני מסכים", "do not agree", "disagree", "
 
 
 def read_export(path):
+    """Two layouts: Qualtrics export (3 header rows) or a plain sheet / Google Forms (one header row, then answers)"""
     p = Path(path)
     d = pd.read_csv(p, encoding="utf-8-sig", header=None, dtype=str) if p.suffix.lower() == ".csv" else pd.read_excel(p, header=None, dtype=str)
     d = d.map(fix_text)
     names = [str(c) for c in d.iloc[0]]
     has_import = d.shape[0] > 2 and str(d.iat[2, 0]).startswith('{"ImportId"')
-    texts = [str(c) for c in d.iloc[1]] if d.shape[0] > 1 else names
-    body = d.iloc[3:] if has_import else d.iloc[2:] if d.shape[0] > 1 and not has_import and texts != names and str(d.iat[1, 0]).lower() in ("start date", "startdate", "response id", "") else d.iloc[1:]
+    if has_import:                                   # Qualtrics
+        texts, body = [str(c) for c in d.iloc[1]], d.iloc[3:]
+        qcols = [i for i in range(len(names)) if "QID" in str(d.iat[2, i])]
+    else:                                            # plain sheet: header row, then one row per response
+        texts, body = names, d.iloc[1:]
+        skip = ("timestamp", "חותמת זמן", "email", "אימייל", "דוא")
+        qcols = [i for i, n in enumerate(names) if not any(x in n.lower() for x in skip)]
     body = body.reset_index(drop=True); body.columns = range(len(names))
-    qcols = [i for i in range(len(names)) if has_import and "QID" in str(d.iat[2, i])]
     return dict(names=names, texts=texts, body=body, qcols=qcols, has_import=has_import, path=p.name)
 
 
@@ -154,7 +159,7 @@ def main():
                 add(f"{label}: שאלות ריקות", WARN if miss else PASS,
                     (f"{len(miss)} ריקות, למשל: " + " | ".join(miss[:3])) if miss else "כל השאלות מולאו")
             else:
-                add(f"{label}: שאלות ריקות", INFO, "לא נבדק (בייצוא אין שורת ImportId)")
+                add(f"{label}: שאלות ריקות", INFO, "לא נבדק (לא זוהו עמודות שאלות)")
         # consent answer
         if "consent" in found_rows:
             ex, row = found_rows["consent"]
@@ -163,7 +168,7 @@ def main():
                 add("הסכמה: תשובת ההסכמה", WARN, "לא זוהתה עמודת הסכמה, לבדוק ידנית")
             else:
                 vals = [(ex["names"][i], str(row[i])) for i in cc if not empty(row[i])]
-                refused = [n for n, v in vals if any(has_word(v.lower(), x) for x in NEG)]
+                refused = [f"{n} = {v[:30]}" for n, v in vals if any(has_word(v.lower(), x) for x in NEG)]
                 if not vals:
                     add("הסכמה: תשובת ההסכמה", FAIL, f"עמודה {ex['names'][cc[0]]} ריקה")
                 elif refused:
