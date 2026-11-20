@@ -56,6 +56,53 @@ def save_upload(up, outdir, fname):
         return None
     p = outdir / (fname + Path(up.name).suffix.lower()); p.write_bytes(up.getvalue()); return str(p)
 
+def drive_installed():
+    """True/False on Windows and Mac; None where we cannot tell"""
+    try:
+        if os.name == "nt":
+            pf = [os.environ.get("ProgramFiles", r"C:\Program Files"), os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]
+            return any((Path(x) / "Google" / "Drive File Stream").exists() for x in pf)
+        if sys.platform == "darwin":
+            return Path("/Applications/Google Drive.app").exists()
+    except Exception:
+        pass
+    return None
+
+DRIVE_PAGE = "https://www.google.com/drive/download/"
+
+def install_drive():
+    """Download Google's official installer and start it (the user still confirms and signs in). Returns a message."""
+    import urllib.request, webbrowser
+    try:
+        if os.name == "nt":
+            url, dst = "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe", Path(tempfile.gettempdir()) / "GoogleDriveSetup.exe"
+        elif sys.platform == "darwin":
+            url, dst = "https://dl.google.com/drive-file-stream/GoogleDrive.dmg", Path(tempfile.gettempdir()) / "GoogleDrive.dmg"
+        else:
+            webbrowser.open(DRIVE_PAGE); return "נפתח דף ההורדה של Google (המערכת הזו אינה Windows או Mac)."
+        urllib.request.urlretrieve(url, dst)
+        if os.name == "nt":
+            os.startfile(str(dst))
+        else:
+            subprocess.run(["open", str(dst)])
+        return "המתקין הופעל. אשרו אותו בחלון שנפתח (ייתכן שיידרשו הרשאות מנהל), והתחברו לחשבון Google."
+    except Exception as e:
+        webbrowser.open(DRIVE_PAGE)
+        return f"ההורדה האוטומטית נכשלה ({type(e).__name__}). נפתח דף ההורדה של Google, התקינו משם ידנית."
+
+def drive_box():
+    inst = drive_installed()
+    with st.expander("גישה לתיקיית Google Drive", expanded=(inst is False)):
+        if inst is True:
+            st.success("Google Drive for Desktop מותקן. בחרו את התיקייה תחת כונן Drive (בדרך כלל G:).")
+        else:
+            st.write("התיקייה נמצאת ב-Google Drive. כדי לבחור אותה כאן צריך את Google Drive for Desktop, שמציג את ה-Drive כאות כונן במחשב."
+                     + (" לא זיהיתי אותו במחשב הזה (הזיהוי עלול לטעות אם הותקן במקום לא רגיל)." if inst is False else ""))
+            st.caption("הכפתור מוריד את המתקין הרשמי של Google ומפעיל אותו. עדיין צריך לאשר את ההתקנה ולהתחבר לחשבון. אם ההתקנה נחסמת, פנו למנהל המחשב.")
+            if st.button("התקן Google Drive"):
+                st.info(install_drive())
+        st.caption("אחרי ההתקנה: אם התיקייה שותפה אליכם, הוסיפו אותה ל-My Drive (קליק ימני ← Organize ← Add shortcut), וסמנו אותה ב-Explorer כ-Available offline כדי שהבדיקה לא תהיה איטית.")
+
 def color(df, col):
     shown = df.copy()
     shown[col] = shown[col].map(lambda v: LABEL.get(v, v))
@@ -89,6 +136,7 @@ with tab_pre:
         st.caption("הבדיקה לא מחליפה צפייה בסרטון האפוטרופוס ובתמונת הרישיון: היא בודקת רק שהקבצים הועלו.")
 
 with tab_end:
+    drive_box()
     st.write("בודק את תיקיות המשתתפים אחרי הניסוי: קובץ תוצאות, קובץ הקלטה (וידאו ואורך), כיסוי ההקלטה את הסקר ותקינות התשובות.")
     if "folder" not in st.session_state:
         st.session_state.folder = ""
